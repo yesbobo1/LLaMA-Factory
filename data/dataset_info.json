@@ -107,6 +107,21 @@
       "tools": "tools"
     }
   },
+  "ansa_sft": {
+    "file_name": "1_1_4w_train.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "system": "system",
+      "messages": "conversations",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "gpt"
+    }
+  },
   "glaive_toolcall_zh": {
     "hf_hub_url": "llamafactory/glaive_toolcall_zh",
     "formatting": "sharegpt",
