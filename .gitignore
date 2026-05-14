@@ -181,3 +181,5 @@ wandb/
 swanlog/
 generated_predictions.jsonl
 predictions_score.json
+
+data/1_1_4w_train.json
