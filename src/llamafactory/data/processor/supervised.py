@@ -47,6 +47,70 @@ class PackingParams:
     right_padding_length: int
 
 
+def find_subsequence(seq: list[int], pattern: list[int]) -> int:
+    n, m = len(seq), len(pattern)
+    if m == 0 or n < m:
+        return -1
+
+    for i in range(n - m + 1):
+        if seq[i : i + m] == pattern:
+            return i
+
+    return -1
+
+
+def build_token_weights_from_labels(
+    input_ids: list[int],
+    labels: list[int],
+    tokenizer,
+    think_weight: float = 0.2,
+    answer_weight: float = 0.8,
+    think_start_text: str = "<think>",
+    think_end_text: str = "</think>",
+    answer_start_text: str = "<answer>",
+    answer_end_text: str = "</answer>",
+) -> list[float]:
+    r"""Build token-level loss weights aligned with labels.
+
+    - tokens inside <think>...</think> get think_weight
+    - tokens inside <answer>...</answer> get answer_weight
+    - all other tokens get 0.0
+    - tokens with labels == IGNORE_INDEX do not contribute to loss
+    """
+    think_start_ids = tokenizer.encode(think_start_text, add_special_tokens=False)
+    think_end_ids = tokenizer.encode(think_end_text, add_special_tokens=False)
+    answer_start_ids = tokenizer.encode(answer_start_text, add_special_tokens=False)
+    answer_end_ids = tokenizer.encode(answer_end_text, add_special_tokens=False)
+
+    token_weights = [0.0] * len(input_ids)
+    matched = False
+
+    # think region
+    ts = find_subsequence(input_ids, think_start_ids)
+    te = find_subsequence(input_ids, think_end_ids)
+    if ts != -1 and te != -1 and te > ts:
+        for i in range(ts + len(think_start_ids), te):
+            if i < len(labels) and labels[i] != IGNORE_INDEX:
+                token_weights[i] = think_weight
+                matched = True
+
+    # answer region
+    ans_s = find_subsequence(input_ids, answer_start_ids)
+    ans_e = find_subsequence(input_ids, answer_end_ids)
+    if ans_s != -1 and ans_e != -1 and ans_e > ans_s:
+        for i in range(ans_s + len(answer_start_ids), ans_e):
+            if i < len(labels) and labels[i] != IGNORE_INDEX:
+                token_weights[i] = answer_weight
+                matched = True
+
+    if not matched:
+        for i in range(min(len(token_weights), len(labels))):
+            if labels[i] != IGNORE_INDEX:
+                token_weights[i] = 1.0
+
+    return token_weights
+
+
 @dataclass
 class SupervisedDatasetProcessor(DatasetProcessor):
     def _encode_data_example(
@@ -125,9 +189,25 @@ class SupervisedDatasetProcessor(DatasetProcessor):
                 videos=examples["_videos"][i] or [],
                 audios=examples["_audios"][i] or [],
             )
+
+            think_w = float(getattr(self.data_args, "think_loss_weight", 0.2))
+            answer_w = float(getattr(self.data_args, "answer_loss_weight", 0.8))
+            token_weights = build_token_weights_from_labels(
+                input_ids=input_ids,
+                labels=labels,
+                tokenizer=self.tokenizer,
+                think_weight=think_w,
+                answer_weight=answer_w,
+                think_start_text="<think>",
+                think_end_text="</think>",
+                answer_start_text="<answer>",
+                answer_end_text="</answer>",
+            )
+
             model_inputs["input_ids"].append(input_ids)
             model_inputs["attention_mask"].append([1] * len(input_ids))
             model_inputs["labels"].append(labels)
+            model_inputs["token_weights"].append(token_weights)
             model_inputs["images"].append(examples["_images"][i])
             model_inputs["videos"].append(examples["_videos"][i])
             model_inputs["audios"].append(examples["_audios"][i])
@@ -140,6 +220,8 @@ class SupervisedDatasetProcessor(DatasetProcessor):
         print("inputs:\n{}".format(self.tokenizer.decode(example["input_ids"], skip_special_tokens=False)))
         print("label_ids:\n{}".format(example["labels"]))
         print(f"labels:\n{self.tokenizer.decode(valid_labels, skip_special_tokens=False)}")
+        if "token_weights" in example:
+            print("token_weights:\n{}".format(example["token_weights"]))
 
 
 @dataclass
@@ -149,7 +231,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
         # build inputs with format `<bos> X1 Y1 <eos> <bos> X2 Y2 <eos>`
         # and labels with format `<ignore> ... <ignore> Y1 <eos> <ignore> ... <ignore> Y2 <eos>`
         valid_num = 0
-        batch_input_ids, batch_labels, batch_images, batch_videos, batch_audios = [], [], [], [], []
+        batch_input_ids, batch_labels, batch_token_weights, batch_images, batch_videos, batch_audios = [], [], [], [], [], []
         lengths = []
         length2indexes = defaultdict(list)
         for i in range(len(examples["_prompt"])):
@@ -168,6 +250,21 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 videos=examples["_videos"][i] or [],
                 audios=examples["_audios"][i] or [],
             )
+
+            think_w = float(getattr(self.data_args, "think_loss_weight", 0.2))
+            answer_w = float(getattr(self.data_args, "answer_loss_weight", 0.8))
+            token_weights = build_token_weights_from_labels(
+                input_ids=input_ids,
+                labels=labels,
+                tokenizer=self.tokenizer,
+                think_weight=think_w,
+                answer_weight=answer_w,
+                think_start_text="<think>",
+                think_end_text="</think>",
+                answer_start_text="<answer>",
+                answer_end_text="</answer>",
+            )
+
             length = len(input_ids)
             if length > self.data_args.cutoff_len:
                 logger.warning_rank0(f"Dropped lengthy example with length {length} > {self.data_args.cutoff_len}.")
@@ -176,6 +273,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 length2indexes[length].append(valid_num)
                 batch_input_ids.append(input_ids)
                 batch_labels.append(labels)
+                batch_token_weights.append(token_weights)
                 batch_images.append(examples["_images"][i] or [])
                 batch_videos.append(examples["_videos"][i] or [])
                 batch_audios.append(examples["_audios"][i] or [])
@@ -185,7 +283,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
         requires_packing_params = self.data_args.neat_packing
         knapsacks = greedy_knapsack(lengths, self.data_args.cutoff_len)
         for knapsack in knapsacks:
-            packed_input_ids, packed_attention_masks, packed_position_ids, packed_labels = [], [], [], []
+            packed_input_ids, packed_attention_masks, packed_position_ids, packed_labels, packed_token_weights = [], [], [], [], []
             packed_images, packed_videos, packed_audios = [], [], []
             if requires_packing_params:
                 sequence_boundaries = [0]
@@ -198,6 +296,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 packed_input_ids += batch_input_ids[index]
                 packed_position_ids += list(range(len(batch_input_ids[index])))  # NOTE: pad_to_multiple_of ignore this
                 packed_labels += batch_labels[index]
+                packed_token_weights += batch_token_weights[index]
                 packed_images += batch_images[index]
                 packed_videos += batch_videos[index]
                 packed_audios += batch_audios[index]
@@ -220,6 +319,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 packed_input_ids += [self.tokenizer.pad_token_id] * pad_length
                 packed_position_ids += [0] * pad_length
                 packed_labels += [IGNORE_INDEX] * pad_length
+                packed_token_weights += [0.0] * pad_length
                 if self.data_args.neat_packing:
                     packed_attention_masks += [0] * pad_length
                 else:
@@ -245,6 +345,7 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
             model_inputs["attention_mask"].append(packed_attention_masks)
             model_inputs["position_ids"].append(packed_position_ids)
             model_inputs["labels"].append(packed_labels)
+            model_inputs["token_weights"].append(packed_token_weights)
             model_inputs["images"].append(packed_images or None)
             model_inputs["videos"].append(packed_videos or None)
             model_inputs["audios"].append(packed_audios or None)
