@@ -419,30 +419,12 @@ class MultiModalDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
         features: dict[str, torch.Tensor] = super().__call__(features)
 
-<<<<<<< HEAD
         bsz, seq_len = features["input_ids"].shape[:2]
         model_type = getattr(self.model.config, "model_type", None) if self.model is not None else None
         is_omni = model_type in [
             "qwen2_5_omni_thinker",
             "qwen3_omni_moe_thinker",
         ]
-=======
-        if "token_weights" in features:
-            target_len = features["input_ids"].size(1)
-            current_len = features["token_weights"].size(1)
-            if current_len != target_len:
-                if current_len > target_len:
-                    if self.tokenizer.padding_side == "right":
-                        features["token_weights"] = features["token_weights"][:, :target_len]
-                    else:
-                        features["token_weights"] = features["token_weights"][:, -target_len:]
-                else:
-                    pad_len = target_len - current_len
-                    if self.tokenizer.padding_side == "right":
-                        features["token_weights"] = F.pad(features["token_weights"], (0, pad_len), value=0.0)
-                    else:
-                        features["token_weights"] = F.pad(features["token_weights"], (pad_len, 0), value=0.0)
->>>>>>> c5dcb88 (update sft trainer and add qwen25vl configs/scripts)
 
         if self.get_rope_func is not None:
             # for mmrope situation, we should calculate position_ids and rope_deltas per sample.
