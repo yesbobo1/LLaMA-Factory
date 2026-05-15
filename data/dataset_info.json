@@ -16,6 +16,57 @@
       "tools": "tools"
     }
   },
+  "ansa_sft": {
+    "file_name": "train_dire_animal_add-800-prompt.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "system": "system",
+      "messages": "conversations",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "gpt",
+      "observation_tag": "observation",
+      "function_tag": "function_call",
+      "system_tag": "system"
+    }
+  },
+  "ansa_sft2": {
+    "file_name": "sgc-add-2ans-f-sys.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "system": "system",
+      "messages": "conversations",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "gpt",
+      "observation_tag": "observation",
+      "function_tag": "function_call",
+      "system_tag": "system"
+    }
+  },
+  "ansa_sft3": {
+    "file_name": "ansa_sft_2_all_ocrasr—gt2-clean2.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "system": "system",
+      "messages": "conversations",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "gpt"
+    }
+  },
   "glaive_toolcall_zh_demo": {
     "file_name": "glaive_toolcall_zh_demo.json",
     "formatting": "sharegpt",
