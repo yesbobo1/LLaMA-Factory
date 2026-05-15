@@ -71,6 +71,16 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
             self.model_accepts_loss_kwargs = False
 
         self.finetuning_args = finetuning_args
+
+        # ===== 新增：读取可开关的 think/answer weighted loss 配置 =====
+        self.use_think_answer_weighted_loss = getattr(
+            finetuning_args, "use_think_answer_weighted_loss", False
+        )
+        self.think_loss_weight = float(getattr(finetuning_args, "think_loss_weight", 0.2))
+        self.answer_loss_weight = float(getattr(finetuning_args, "answer_loss_weight", 0.8))
+        self._weighted_loss_logged = False
+        # ============================================================
+
         if gen_kwargs is not None:
             # https://github.com/huggingface/transformers/blob/v4.45.0/src/transformers/trainer_seq2seq.py#L287
             self._gen_kwargs = gen_kwargs
@@ -148,6 +158,7 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
         return super()._get_train_sampler(*args, **kwargs)
 
     @override
+<<<<<<< HEAD
     def compute_loss(self, model, inputs, *args, **kwargs):
         if self.finetuning_args.use_asft_loss:
             with torch.no_grad():
@@ -160,6 +171,75 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
             return self.compute_loss_func(outputs, inputs["labels"], ref_logits)
         else:
             return super().compute_loss(model, inputs, *args, **kwargs)
+=======
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, *args, **kwargs):
+        # 开关关闭时，完全走原始逻辑
+        if not self.use_think_answer_weighted_loss:
+            inputs.pop("token_weights", None)
+            return super().compute_loss(
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
+                *args,
+                **kwargs,
+            )
+
+        labels = inputs.get("labels")
+        token_weights = inputs.pop("token_weights", None)
+
+        # 没有 labels 或没有 token_weights，都退回默认 loss
+        if labels is None or token_weights is None:
+            return super().compute_loss(
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
+                *args,
+                **kwargs,
+            )
+
+        if not self._weighted_loss_logged:
+            logger.info_rank0(
+                f"Using think/answer weighted loss. "
+                f"think_loss_weight={self.think_loss_weight}, "
+                f"answer_loss_weight={self.answer_loss_weight}"
+            )
+            self._weighted_loss_logged = True
+
+        # 前向
+        model_inputs = dict(inputs)
+        model_inputs.pop("labels", None)
+
+        outputs = model(**model_inputs)
+        logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
+
+        # causal LM shift
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # 逐 token loss
+        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduction="none")
+        loss_per_token = loss_fct(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+        ).view_as(shift_labels)
+
+        valid_mask = shift_labels.ne(IGNORE_INDEX).float()
+        shift_weights = token_weights[..., 1:].contiguous().to(loss_per_token.device).float()
+
+        # 只统计有效 label 的 token
+        effective_weights = shift_weights * valid_mask
+
+        denom = effective_weights.sum()
+        if denom.item() == 0:
+            denom = valid_mask.sum().clamp_min(1.0)
+            loss = (loss_per_token * valid_mask).sum() / denom
+        else:
+            loss = (loss_per_token * effective_weights).sum() / denom
+
+        return (loss, outputs) if return_outputs else loss
+>>>>>>> c5dcb88 (update sft trainer and add qwen25vl configs/scripts)
 
     @override
     def prediction_step(
@@ -174,6 +254,7 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
 
         Subclass and override to inject custom behavior.
         """
+        inputs.pop("token_weights", None)
         if self.args.predict_with_generate:  # do not pass labels to model when generate
             labels = inputs.pop("labels", None)
         else:
