@@ -524,6 +524,18 @@ class FinetuningArguments(
         default=1.0,
         metadata={"help": "The alpha parameter for EAFT loss to control the power of adaptive weight."},
     )
+    use_think_answer_weighted_loss: bool = field(
+        default=False,
+        metadata={"help": "Whether to use weighted loss for <think> and <answer> segments in SFT."},
+    )
+    think_loss_weight: float = field(
+        default=0.2,
+        metadata={"help": "Loss weight for tokens inside <think>...</think>."},
+    )
+    answer_loss_weight: float = field(
+        default=0.8,
+        metadata={"help": "Loss weight for tokens inside <answer>...</answer>."},
+    )
     freeze_vision_tower: bool = field(
         default=True,
         metadata={"help": "Whether ot not to freeze the vision tower in MLLM training."},
@@ -613,6 +625,18 @@ class FinetuningArguments(
 
             if self.pissa_init:
                 raise ValueError("`pissa_init` is only valid for LoRA training.")
+
+        if self.think_loss_weight < 0:
+            raise ValueError("`think_loss_weight` must be >= 0.")
+
+        if self.answer_loss_weight < 0:
+            raise ValueError("`answer_loss_weight` must be >= 0.")
+
+        if self.use_think_answer_weighted_loss and self.think_loss_weight == 0 and self.answer_loss_weight == 0:
+            raise ValueError(
+                "`think_loss_weight` and `answer_loss_weight` cannot both be 0 when "
+                "`use_think_answer_weighted_loss` is enabled."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         args = asdict(self)
