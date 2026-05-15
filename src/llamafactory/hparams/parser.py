@@ -502,6 +502,9 @@ def get_train_args(args: dict[str, Any] | list[str] | None = None) -> _TRAIN_CLS
     model_args.model_max_length = data_args.cutoff_len
     model_args.block_diag_attn = data_args.neat_packing
     data_args.packing = data_args.packing if data_args.packing is not None else finetuning_args.stage == "pt"
+    data_args.use_think_answer_weighted_loss = getattr(finetuning_args, "use_think_answer_weighted_loss", False)
+    data_args.think_loss_weight = getattr(finetuning_args, "think_loss_weight", 0.2)
+    data_args.answer_loss_weight = getattr(finetuning_args, "answer_loss_weight", 0.8)
 
     # Log on each process the small summary
     logger.info(
